@@ -108,3 +108,14 @@ with tab2:
                 st.info("🔎 일부 수치에서 이상이 있습니다. 추가 검사가 필요할 수 있습니다.")
             else:
                 st.error("🚨 신장 질환이 의심됩니다. 추가적인 정밀 진단이 필요합니다.")
+
+# 문서 출력
+if docs_and_sources:
+    for i, (doc, source) in enumerate(docs_and_sources):
+        st.markdown(f"**{i+1}.** `{source}`")
+        if doc.page_content.strip():
+            st.write(doc.page_content)
+        else:
+            st.write('해당 문서에서 답변을 찾을 수 없습니다.')
+else:
+    st.warning("🔍 문서에서 관련 정보를 찾을 수 없습니다.")
