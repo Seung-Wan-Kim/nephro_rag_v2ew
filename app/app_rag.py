@@ -1,80 +1,107 @@
 import streamlit as st
 from langchain_community.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
-from langchain.llms import OpenAI
+from langchain_community.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.llms import OpenAI
 import os
 
-# -------------------- 설정 --------------------
-# 벡터 DB 경로 자동 선택 함수
+# 수치 기반 분석용 라이브러리
+import pandas as pd
+
+# ---------------------------
+# 벡터 로딩 함수
+# ---------------------------
+def load_vector_db(vector_path):
+    embedding_model = HuggingFaceEmbeddings(model_name="jhgan/ko-sbert-nli")
+    return FAISS.load_local(vector_path, embedding_model, allow_dangerous_deserialization=True)
+
+# ---------------------------
+# 질병군별 경로 판단
+# ---------------------------
 def get_vector_path_from_question(question):
-    keywords = {
-        "aki": ["aki", "급성신손상"],
-        "ckd": ["ckd", "만성신질환", "만성콩팥병"],
-        "ns": ["nephrotic", "신증후군"],
-        "gn": ["glomerulonephritis", "사구체신염"],
-        "electrolyte": ["electrolyte", "전해질"]
-    }
-    for folder, keys in keywords.items():
-        for key in keys:
-            if key.lower() in question.lower():
-                return f"vector_store_{folder}/"
-    return "vector_store_aki/"  # 기본값
+    if "급성" in question or "AKI" in question:
+        return "vector_store_aki_md_ko/"
+    elif "만성" in question or "CKD" in question:
+        return "vector_store_ckd_md_ko/"
+    elif "신증후군" in question or "단백뇨" in question:
+        return "vector_store_ns_md_ko/"
+    elif "사구체신염" in question or "Glomerulonephritis" in question:
+        return "vector_store_gn_md_ko/"
+    elif "전해질" in question or "Electrolyte" in question:
+        return "vector_store_electrolyte_md_ko/"
+    else:
+        return None
 
-# -------------------- Streamlit UI --------------------
-st.set_page_config(page_title="Nephrology RAG System", layout="wide")
-st.title("🧠 신장내과 진단 지원 시스템")
+# ---------------------------
+# 수치 기반 분석 함수
+# ---------------------------
+def analyze_lab_values(inputs):
+    messages = []
+    recommendations = []
+    score = 0
 
-# 수치 입력 칼럼 구성
-st.subheader("1. 혈액 검사 수치 입력")
-cols = st.columns(4)
+    if inputs["Creatinine"] > 1.2:
+        messages.append("크레아티닌 수치가 높습니다. AKI 가능성을 고려하세요.")
+        score += 30
+    if inputs["eGFR"] < 60:
+        messages.append("eGFR이 낮습니다. CKD 가능성이 있습니다.")
+        score += 30
+    if inputs["Albumin"] < 3.0:
+        messages.append("알부민이 낮습니다. Nephrotic Syndrome을 고려해보세요.")
+        score += 20
+    if inputs["Proteinuria"] > 1.0:
+        messages.append("단백뇨 수치가 높습니다. 사구체 질환 가능성이 있습니다.")
+        score += 20
 
-input_labels = [
-    "BUN", "Creatinine", "B/C ratio", "eGFR", "Na", "K", "Cl", "CO2", "Ca", "IP",
-    "Hb", "PTH", "Vitamin D", "ALP", "LDH", "Lactate", "Albumin", "Proteinuria", "CRP", "Glucose"
-]
+    if score == 0:
+        recommendations.append("더 많은 혈액검사 항목을 입력하시면 정확도가 향상됩니다.")
 
+    return messages, recommendations, score
+
+# ---------------------------
+# Streamlit UI
+# ---------------------------
+st.title("🩺 신장내과 문서 기반 질의응답 + 수치 기반 분석")
+
+# 수치 입력창
+st.header("🧪 혈액검사 수치 입력")
+default_vals = {"Creatinine": 1.0, "eGFR": 90, "Albumin": 4.0, "Proteinuria": 0.0}
 user_inputs = {}
-for i, label in enumerate(input_labels):
-    with cols[i % 4]:
-        user_inputs[label] = st.text_input(f"{label}")
 
-# 결과 확인 버튼 1 (수치 기반 진단용)
-if st.button("수치 기반 결과 확인"):
-    st.markdown("👉 이 기능은 향후 구현될 예정입니다. 현재는 자연어 질문만 지원됩니다.")
+col1, col2 = st.columns(2)
+with col1:
+    user_inputs["Creatinine"] = st.number_input("Creatinine (mg/dL)", value=default_vals["Creatinine"])
+    user_inputs["Albumin"] = st.number_input("Albumin (g/dL)", value=default_vals["Albumin"])
+with col2:
+    user_inputs["eGFR"] = st.number_input("eGFR (ml/min/1.73㎡)", value=default_vals["eGFR"])
+    user_inputs["Proteinuria"] = st.number_input("Proteinuria (g/day)", value=default_vals["Proteinuria"])
+
+if st.button("🔍 수치 기반 분석 실행"):
+    messages, recs, score = analyze_lab_values(user_inputs)
+    st.subheader("🔎 분석 결과")
+    for msg in messages:
+        st.info(msg)
+    for rec in recs:
+        st.warning(rec)
+    st.success(f"예상 유사도 점수: {score}점 (100점 만점 기준)")
 
 # 자연어 질문
-st.subheader("2. 자연어 질문")
-query = st.text_area("질문을 입력하세요", placeholder="예: 급성신손상의 정의는?")
+st.header("💬 질의응답 (RAG)")
+question = st.text_input("질문을 입력하세요", placeholder="예: 급성 신손상의 정의는?")
 
-# 결과 확인 버튼 2 (RAG)
-if st.button("자연어 기반 질의 결과 확인") and query:
-    # 벡터 경로 추출
-    vector_path = get_vector_path_from_question(query)
-
-    # 벡터 파일 존재 확인
-    if not (os.path.exists(os.path.join(vector_path, "index.faiss")) and os.path.exists(os.path.join(vector_path, "index.pkl"))):
-        st.error(f"해당 질병군에 대한 벡터 데이터가 존재하지 않습니다: {vector_path}")
+if st.button("📚 문서 기반 응답 생성"):
+    vector_path = get_vector_path_from_question(question)
+    if vector_path is None or not os.path.exists(vector_path):
+        st.error(f"❌ 해당 질병군에 대한 벡터 데이터가 존재하지 않습니다: {vector_path}")
     else:
-        # 임베딩 모델 불러오기
-        embedding_model = HuggingFaceEmbeddings(model_name="jhgan/ko-sbert-nli")
-
-        # 벡터 DB 로드
-        try:
-            db = FAISS.load_local(vector_path, embedding_model, allow_dangerous_deserialization=True)
-        except ValueError as e:
-            st.error(f"FAISS 로딩 오류: {str(e)}")
-            st.stop()
-
-        # QA 체인 생성
-        qa = RetrievalQA.from_chain_type(llm=OpenAI(temperature=0.3), chain_type="stuff", retriever=db.as_retriever())
-
-        # 답변 생성
-        with st.spinner("답변 생성 중..."):
-            result = qa.run(query)
-        st.markdown("#### 📘 답변")
-        st.write(result)
-
-# 참고
-st.markdown("---")
-st.markdown("📁 *본 시스템은 5개 주요 신장내과 질환군(AKI, CKD, NS, GN, Electrolyte)의 문서 임베딩 기반 RAG 시스템입니다.*")
+        db = load_vector_db(vector_path)
+        qa = RetrievalQA.from_chain_type(
+            llm=OpenAI(temperature=0.3),
+            chain_type="stuff",
+            retriever=db.as_retriever()
+        )
+        result = qa(question)
+        st.subheader("📘 답변:")
+        st.write(result["result"])
