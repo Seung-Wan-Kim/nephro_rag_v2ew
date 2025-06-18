@@ -51,7 +51,7 @@ with tab1:
             if docs:
                 for i, doc in enumerate(docs):
                     source = doc.metadata.get("source", "출처 없음")
-                    st.markdown(f"**{i+1}.** `{source}`)
+        st.markdown(f"**{i+1}.** `{source}`")
 
 {doc.page_content}")
             else:
