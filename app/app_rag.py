@@ -53,7 +53,7 @@ with tab1:
                     source = doc.metadata.get("source", "출처 없음")
         st.markdown(f"**{i+1}.** `{source}`")
 
-{doc.page_content}")
+        st.markdown(f"**{i+1}.** `{source}`\n\n{doc.page_content}")
             else:
                 st.warning("⚠️ 문서에서 관련된 정보를 찾을 수 없습니다.")
 
